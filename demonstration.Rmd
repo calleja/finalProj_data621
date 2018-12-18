@@ -1,0 +1,236 @@
+---
+title: "Final Project Exploration"
+author: "Luis Calleja"
+date: "December 16, 2018"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, message = FALSE, warning=FALSE}
+library(dplyr)
+library(tidyverse)
+library(stringr)
+library(data.table)
+library(ggplot2)
+library(lubridate)
+library(zoo)
+library(forecast)
+library(nlme)
+library(skimr)
+```
+
+## MTA data
+```{r}
+subway <- read.csv('/home/lechuza/Documents/CUNY/data_621/finalProject/MTA_Performance_Agencies.csv', stringsAsFactors = FALSE)
+
+str(subway)
+```
+
+Ride hailing data
+```{r}
+#For Hire Vehicle data
+rh <- read.csv('/home/lechuza/Documents/CUNY/data_621/finalProject/rideHailing/FHV_Base_Aggregate_Report.csv', stringsAsFactors = FALSE)
+
+str(rh)
+```
+Iden's code to join the target variables.
+```{r}
+rh %>%
+  filter(grepl('uber|UBER|lyft|LYFT', rh$Base.Name)) -> ma
+
+dt <- data.table(ma)
+
+test <- dt[,sum(Total.Dispatched.Trips),by = c('Year','Month')]
+
+names(test)[3] <- 'total.dispatched.trips'
+
+#prep the MTA data:
+subway <- subway[, c(4, 11, 12, 16)]
+
+mdf <- subway %>%
+  filter(INDICATOR_NAME == "Mean Distance Between Failures - Subways") %>%
+  spread(INDICATOR_NAME, MONTHLY_ACTUAL)
+tr <- subway %>%
+  filter(INDICATOR_NAME == "Total Ridership - Subways") %>%
+  spread(INDICATOR_NAME, MONTHLY_ACTUAL)
+cir <- subway %>%
+  filter(INDICATOR_NAME == "Customer Injury Rate - Subways") %>%
+  spread(INDICATOR_NAME, MONTHLY_ACTUAL)
+elev <- subway %>%
+  filter(INDICATOR_NAME == "Elevator Availability - Subways") %>%
+  spread(INDICATOR_NAME, MONTHLY_ACTUAL)
+esc <- subway %>%
+  filter(INDICATOR_NAME == "Escalator Availability - Subways") %>%
+  spread(INDICATOR_NAME, MONTHLY_ACTUAL)
+otp <- subway %>%
+  filter(INDICATOR_NAME == "On-Time Performance (Terminal)") %>%
+  spread(INDICATOR_NAME, MONTHLY_ACTUAL)
+wait <- subway %>%
+  filter(INDICATOR_NAME == "Subway Wait Assessment ") %>%
+  spread(INDICATOR_NAME, MONTHLY_ACTUAL)
+
+final.subway <- left_join(mdf, tr, by = c("PERIOD_YEAR", "PERIOD_MONTH"))
+final.subway <- left_join(final.subway, cir, by = c("PERIOD_YEAR", "PERIOD_MONTH"))
+final.subway <- left_join(final.subway, elev, by = c("PERIOD_YEAR", "PERIOD_MONTH"))
+final.subway <- left_join(final.subway, esc, by = c("PERIOD_YEAR", "PERIOD_MONTH"))
+final.subway <- left_join(final.subway, otp, by = c("PERIOD_YEAR", "PERIOD_MONTH"))
+final.subway <- left_join(final.subway, wait, by = c("PERIOD_YEAR", "PERIOD_MONTH"))
+```
+
+Iden renames the dataframe and finalizes it.
+```{r}
+final.subway <- final.subway[-c(1:17),]
+colnames(final.subway) <- c("YEAR", "MONTH", "FAILURE", "RIDERSHIP", "INJURY", "ELEV", "ESCA", "OTP","WAIT")
+
+#merge the FHV to MTA
+names(final.subway)
+dt.fs <- data.table(final.subway)
+```
+
+Merge MTA dataset to the FHV data.
+```{r}
+tot <- merge(test,dt.fs, by.x = c('Year','Month'), by.y = c("YEAR","MONTH"), suffixes = c(".fhv",".mta"))
+#36 observations... is that expected? Yes, the MTA data doesn't include 2018
+tot.m <- merge(test,dt.fs, by.x = c('Year','Month'), by.y = c("YEAR","MONTH"), suffixes = c(".fhv",".mta"), all.x = TRUE)
+
+names(tot.m)
+z <- zoo::as.yearmon(paste(tot.m$Year, tot.m$Month, rep('01', length(tot.m$Year)),sep = '-'))
+
+tot.m$month.date <- z
+```
+
+Overlay monthly public ridership, FHV ridership, mta on time performance
+```{r}
+par(mfrow = c(3,2))
+plot.zoo(tot.m$month.date, tot.m$RIDERSHIP, type = 'l', main = "Ridership")
+plot.zoo(tot.m$month.date, tot.m$FAILURE, type = 'l', main ="failures")
+plot.zoo(tot.m$month.date, tot.m$OTP, type = 'l', main = "On time performance")
+plot.zoo(tot.m$month.date, tot.m$total.dispatched.trips, type = 'l', main = "FHV Dispatched")
+plot.zoo(tot.m$month.date, tot.m$WAIT, type = 'l', main = "Subway Wait Assessment")
+```
+
+Analyze seasonality and trend for the response and predictor variables as they are all temporal.
+```{r}
+trend_ridership <- ma(tot.m$RIDERSHIP, order = 12, centre = TRUE)
+par(mfrow = c(2,1))
+plot(as.ts(tot.m$RIDERSHIP))
+lines(trend_ridership)
+plot(as.ts(trend_ridership))
+
+ts_ride <- ts(tot.m$RIDERSHIP, frequency = 12)
+ts.fhv <- ts(tot.m$total.dispatched.trips, frequency = 12)
+ts.fail <- ts(tot.m$FAILURE, frequency = 12)
+ts.otp <- ts(tot.m$OTP, frequency = 12)
+ts.wait <- ts(tot.m$WAIT, frequency = 12)
+
+ts.ride.de <- decompose(ts_ride, "multiplicative")
+ts.fhv.de <- decompose(ts.fhv, "multiplicative")
+ts.fail.de <- decompose(ts.fail, "multiplicative")
+ts.otp.de <- decompose(ts.otp, "multiplicative")
+
+#plot ridership deconstructed time series
+plot(decompose(ts_ride, "multiplicative"))
+#plot ride hailing dispatched trips deconstructed time series
+plot(decompose(ts.fhv, "multiplicative"))
+#plot failure MTA deconstructed time series
+plot(decompose(ts.fail, "multiplicative"))
+#plot on time performance deconstructed time series
+plot(decompose(ts.otp, "multiplicative"))
+```
+
+Look at the autocorrelation tendencies from each variable.
+```{r}
+head(ts.ride.de$random)
+#acf(ts.ride.de$random)
+par(mfrow=c(1,1))
+acf(tot.m$RIDERSHIP[!is.na(tot.m$RIDERSHIP)])
+```
+This confirms the seasonality inherent in the ridership time series.
+
+Plot the autocorrelation measure among the predictors.
+```{r}
+acf(tot.m$total.dispatched.trips[!is.na(tot.m$total.dispatched.trips)])
+acf(tot.m$OTP[!is.na(tot.m$OTP)])
+acf(tot.m$WAIT[!is.na(tot.m$WAIT)])
+```
+
+Initially... my desire was to build two models:
+1) The first model is built using the entirely decomposed time series with trend and seasonality removed.
+2) Second model is built using the trend datasets (with seasonality removed) from each variable.
+
+This is not very feasible as the de-trending and seasonality removal would leave us too few observations (<30). Instead, we'll fit a more naive lm and account for any serial correlation via the GLS approach.
+
+Plot a time series model on lags of first and second order of each of the predictors.
+```{r}
+tot.m %>%
+  dplyr::select(-INJURY) -> temp
+
+temp[complete.cases(temp)] -> tot.m.cc
+
+lagged.set = data.frame(
+  ridership = lag(tot.m.cc$RIDERSHIP,1),
+fhv = tot.m.cc$total.dispatched.trips,
+failure = tot.m.cc$FAILURE,
+otp = tot.m.cc$OTP,
+wait = tot.m.cc$WAIT,
+month = tot.m.cc$Month)
+
+lagged.set <- lagged.set[complete.cases(lagged.set),]
+```
+
+Fit a model on the lagged predictors
+```{r}
+model.ts <- lm(data = lagged.set, ridership ~ .)
+
+summary(model.ts)
+```
+
+Wow, the model is hot garbage!
+
+Model diagnostics
+```{r}
+par(mfrow=c(1,1))
+plot(model.ts$fitted, rstandard(model.ts))
+
+qqnorm(residuals(model.ts))
+qqline(residuals(model.ts))
+```
+
+The qqplot demonstrates a pattern among the residuals.
+
+Treat the response variable, then re-fit.
+```{r}
+model.ts.sqrt <- lm(data = lagged.set, I(log(ridership) ~ .))
+
+summary(model.ts.sqrt)
+```
+
+Fit a generalized least squares model
+```{r}
+summary(gls(data = lagged.set, ridership ~ .))
+```
+
+Iden's model 
+```{r}
+fs.cc <- final.subway[complete.cases(final.subway),]
+model <- lm(OTP ~ FAILURE + RIDERSHIP + INJURY + ELEV + ESCA, data = fs.cc)
+
+summary(model)
+```
+Plot the residuals... looks like there is a pattern of the residuals... almost a negative quadratic
+```{r}
+par(mfrow= c(1,1))
+plot(model$fitted, rstandard(model))
+```
+
+Plot each variable against the residuals
+```{r}
+fs.cc %>%
+  dplyr::select(FAILURE, RIDERSHIP, ELEV, ESCA, INJURY) %>%
+  gather() -> long.form
+
+long.form$errors <- rep(rstandard(model),5)
+
+ggplot(long.form,aes(x = value, y = errors)) +geom_point() + facet_wrap(~key, scales = "free")
+```
