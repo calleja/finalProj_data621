@@ -2,8 +2,10 @@
 title: "Final Project Exploration"
 author: "Luis Calleja"
 date: "December 16, 2018"
-output: html_document
-editor_options: 
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
   chunk_output_type: console
 ---
 
@@ -197,13 +199,19 @@ qqnorm(residuals(model.ts))
 qqline(residuals(model.ts))
 ```
 
-The qqplot demonstrates a pattern among the residuals.
+The qqplot demonstrates a pattern among the residuals, suggesting the model is not a good fit.
+
+Investigate whether there is any autocorrelation among the error terms.
+```{r}
+acf(model.ts$residuals)
+```
+There is an indication of lag 12 serial correlation of the errors.
 
 Treat the response variable, then re-fit.
 ```{r}
-model.ts.sqrt <- lm(data = lagged.set, I(log(ridership) ~ .))
+model.ts.log <- lm(data = lagged.set, I(log(ridership) ~ .))
 
-summary(model.ts.sqrt)
+summary(model.ts.log)
 ```
 
 Fit a generalized least squares model
