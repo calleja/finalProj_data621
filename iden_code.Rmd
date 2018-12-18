@@ -1,0 +1,133 @@
+---
+title: "Final"
+author: "Iden Watanabe"
+date: "December 14, 2018"
+output: html_document
+---
+
+```{r, Packages, echo = FALSE, message = FALSE}
+require(dplyr)
+require(tidyr)
+require(ggplot2)
+require(caret)
+```
+
+```{r Read, echo = FALSE}
+subway <- read.csv("MTA_Performance_NYCT.csv")
+fhv <- read.csv("FHV_Base_Aggregate_Report.csv")
+```
+
+Rows to spread out:
+
+INDICATOR_NAME
+Mean Distance Between Failures - Subways
+Total Ridership - Subways
+Customer Injury Rate - Subways
+Elevator Availability - Subways
+Escalator Availability - Subways
+On-Time Performance (Terminal)
+
+Columns we care about:
+
+INDICATOR_NAME [4]
+PERIOD_YEAR    [11]
+PERIOD_MONTH   [12]
+MONTHLY_ACTUAL [16]
+Subway Wait Assessment
+
+```{r Clean}
+subway <- subway[, c(4, 11, 12, 16)]
+
+mdf <- subway %>%
+          filter(INDICATOR_NAME == "Mean Distance Between Failures - Subways") %>%
+          spread(INDICATOR_NAME, MONTHLY_ACTUAL)
+tr <- subway %>%
+          filter(INDICATOR_NAME == "Total Ridership - Subways") %>%
+          spread(INDICATOR_NAME, MONTHLY_ACTUAL)
+cir <- subway %>%
+          filter(INDICATOR_NAME == "Customer Injury Rate - Subways") %>%
+          spread(INDICATOR_NAME, MONTHLY_ACTUAL)
+elev <- subway %>%
+          filter(INDICATOR_NAME == "Elevator Availability - Subways") %>%
+          spread(INDICATOR_NAME, MONTHLY_ACTUAL)
+esc <- subway %>%
+          filter(INDICATOR_NAME == "Escalator Availability - Subways") %>%
+          spread(INDICATOR_NAME, MONTHLY_ACTUAL)
+otp <- subway %>%
+          filter(INDICATOR_NAME == "On-Time Performance (Terminal)") %>%
+          spread(INDICATOR_NAME, MONTHLY_ACTUAL)
+
+final.subway <- merge(mdf, tr, by = c("PERIOD_YEAR", "PERIOD_MONTH"))
+final.subway <- merge(final.subway, cir, by = c("PERIOD_YEAR", "PERIOD_MONTH"))
+final.subway <- merge(final.subway, elev, by = c("PERIOD_YEAR", "PERIOD_MONTH"))
+final.subway <- merge(final.subway, esc, by = c("PERIOD_YEAR", "PERIOD_MONTH"))
+final.subway <- merge(final.subway, otp, by = c("PERIOD_YEAR", "PERIOD_MONTH"))
+
+# Focus on OTP
+colnames(final.subway) <- c("YEAR", "MONTH", "FAILURE", "RIDERSHIP", "INJURY", "ELEV", "ESCA", "OTP")
+
+```
+
+```{r FirstModel}
+# Model
+model <- lm(OTP ~ FAILURE + RIDERSHIP + INJURY + ELEV + ESCA,
+            data = final.subway)
+
+summary(model)
+
+qqnorm(model$residuals)
+qqline(model$residuals)
+```
+
+```{r FHV}
+# FHV
+# We only care about Total.DispatchedTrips and Total.Dispatched.Shared.Trips
+# and possibly Unique.Dispatched.Vehicles
+# We can eliminated the NA's for Total.Dispatched.Shared.Trips by zeroing them
+fhv <- fhv[, c(4, 5, 7, 8, 9)]
+fhv$Total.Dispatched.Shared.Trips[is.na(fhv$Total.Dispatched.Shared.Trips)] <- 0
+colnames(fhv) <- c("YEAR", "MONTH", "TOTAL.TRIPS", "SHARED.TRIPS", "VEHICLES")
+
+new.subway <- left_join(final.subway, fhv, by = c("YEAR", "MONTH"))
+```
+
+```{r SecondModel}
+second.model <- lm(OTP ~ FAILURE + RIDERSHIP + INJURY + ELEV + ESCA +
+                   TOTAL.TRIPS + SHARED.TRIPS + VEHICLES, data = new.subway)
+
+summary(second.model)
+
+qqnorm(second.model$residuals)
+qqline(second.model$residuals)
+```
+
+```{r Exploration}
+a <- ggplot(final.subway, aes(x = as.factor(YEAR), y = RIDERSHIP, color = MONTH)) +
+        geom_point() + xlab("YEAR") + ggtitle("NYCT Subway Ridership")
+
+b <- ggplot(final.subway, aes(x = as.factor(YEAR), y = OTP, color = MONTH)) +
+        geom_point() + xlab("YEAR") + ggtitle("NYCT Subway OTP")
+
+c <- ggplot(final.subway, aes(x = as.factor(YEAR), y = FAILURE, color = MONTH)) +
+        geom_point() + xlab("YEAR") + ggtitle("NYCT Mean Dist Between Failure")
+
+d <- ggplot(final.subway, aes(x = as.factor(YEAR), y = INJURY, color = MONTH)) +
+        geom_point() + xlab("YEAR") + ggtitle("NYCT Customer Injury Rate")
+
+e <- ggplot(fhv, aes(x = as.factor(YEAR), y = TOTAL.TRIPS, color = MONTH)) +
+        geom_point() + xlab("YEAR") + ggtitle("FHV Trip")
+
+f <- ggplot(fhv, aes(x = as.factor(YEAR), y = SHARED.TRIPS, color = MONTH)) +
+        geom_point() + xlab("YEAR") + ggtitle("FHV Shared Trips")
+
+g <- ggplot(fhv, aes(x = as.factor(YEAR), y = VEHICLES, color = MONTH)) +
+        geom_point() + xlab("YEAR") + ggtitle("FHV Vehicles")
+
+a
+b
+c
+d
+e
+f
+g
+```
