@@ -216,7 +216,26 @@ summary(model.ts.log)
 
 Fit a generalized least squares model
 ```{r}
-summary(gls(data = lagged.set, ridership ~ .))
+gls.model <-gls(data = lagged.set, ridership ~ .)
+
+residuals(gls.model)
+```
+
+Treat the response and all predictor variables, then re-fit.
+
+We'll fit the model on the month-over-month growth of each of the variables.
+```{r}
+dt.l.s <- data.table(lagged.set)
+
+testy <- dt.l.s[,lapply(.SD,function(x) {diff(log(x),1)})]
+
+testy[,month:= lagged.set$month[1:34]]
+```
+
+```{r}
+model.ts.log <- lm(data = testy, ridership ~ .)
+
+summary(model.ts.log)
 ```
 
 Iden's model 
