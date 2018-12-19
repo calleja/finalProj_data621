@@ -3,6 +3,8 @@ title: "Final"
 author: "Iden Watanabe"
 date: "December 14, 2018"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r, Packages, echo = FALSE, message = FALSE}
@@ -77,6 +79,9 @@ summary(model)
 
 qqnorm(model$residuals)
 qqline(model$residuals)
+
+#some evidence of serial correlation
+acf(rstandard(model))
 ```
 
 ```{r FHV}
